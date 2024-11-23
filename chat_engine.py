@@ -8,6 +8,7 @@ from llama_index.core import ChatPromptTemplate
 from llama_index.core.chat_engine import CondenseQuestionChatEngine
 from llama_index.core.base.llms.types import ChatMessage
 from llama_index.core.prompts.prompt_type import PromptType
+from langdetect import detect
 
 class ChatEngine:
     def __init__(self):
@@ -33,59 +34,115 @@ class ChatEngine:
             vector_store=vector_store
         )
 
-        # Specify the OpenAI model
-        llm = OpenAI(model="gpt-4o", temperature=0.7)
+        # Load the index
+        self.index = VectorStoreIndex.from_vector_store(
+            vector_store
+        )
 
-        # Define custom chat prompt template
+    def detect_language(self, text):
+        try:
+            lang = detect(text)
+            if lang == 'ar':
+                return {
+                    'code': 'ar',
+                    'name': 'Arabic',
+                    'system_msg': """أنت مساعد متخصص في موضوع ختم النبوة. يجب أن تجيب باللغة العربية فقط.
+                    
+المبادئ التوجيهية للإجابة:
+1. استخدم اللغة العربية الفصحى
+2. قدم الإجابات مع الأدلة من القرآن والسنة
+3. اذكر المراجع والمصادر الموثوقة
+4. كن دقيقاً في النقل والاقتباس
+
+المعلومات المتوفرة من قاعدة البيانات:
+{context_str}""",
+                    'prefix': 'الجواب: '
+                }
+            elif lang in ['ur', 'hi']:
+                return {
+                    'code': 'ur',
+                    'name': 'Urdu',
+                    'system_msg': """آپ ختم نبوت کے موضوع پر ماہر معاون ہیں۔ آپ کو صرف اردو میں جواب دینا ہے۔
+
+جواب دینے کے اصول:
+1. معیاری اردو کا استعمال کریں
+2. قرآن و سنت سے دلائل فراہم کریں
+3. معتبر حوالہ جات کا ذکر کریں
+4. اقتباسات میں دقت کا خیال رکھیں
+
+ڈیٹا بیس سے دستیاب معلومات:
+{context_str}""",
+                    'prefix': 'جواب: '
+                }
+            else:
+                return {
+                    'code': 'en',
+                    'name': 'English',
+                    'system_msg': """You are an expert assistant on the topic of the Finality of Prophethood. You must respond in English only.
+
+Response guidelines:
+1. Use formal English
+2. Provide evidence from Quran and Sunnah
+3. Cite reliable sources
+4. Be precise in quotations
+
+Information available from the database:
+{context_str}""",
+                    'prefix': 'Response: '
+                }
+        except:
+            return {
+                'code': 'en',
+                'name': 'English',
+                'system_msg': "Default English response...",
+                'prefix': 'Response: '
+            }
+
+    def get_response(self, prompt):
+        # Detect the language of the prompt
+        lang_info = self.detect_language(prompt)
+        
+        # Set model parameters based on language
+        self.llm = OpenAI(
+            model="gpt-4o",
+            temperature=0.7,
+            system_prompt=lang_info['system_msg']
+        )
+
+        # Create custom chat prompt template
         custom_prompt = ChatPromptTemplate(
             message_templates=[
                 ChatMessage(
                     role="system",
-                    content="""You are an AI assistant designed to provide accurate, detailed, and comprehensive information about Prophet Muhammad (Peace Be Upon Him) and Islam. Your responses should be based on authentic Islamic sources and the data provided through the vector database embeddings. Please follow these guidelines:
-
-                    1. Respond in the same language as the user's query. The query language is: {query_language}
-                    2. Provide extremely detailed information with multiple references from authentic Islamic sources.
-                    3. When addressing topics related to Qadiyani groups, provide a comprehensive explanation of their beliefs, the Islamic perspective on these beliefs, and why they are considered problematic by mainstream Islamic scholars.
-                    4. Emphasize the authenticity and finality of Prophet Muhammad's (PBUH) prophethood with detailed arguments and evidence.
-                    5. Be respectful and objective in your responses, avoiding any form of disrespect towards other beliefs.
-                    6. If asked about topics not related to Islam or Prophet Muhammad (PBUH), politely redirect the conversation to the intended subject matter.
-                    7. If you're unsure about any information, state that clearly rather than making assumptions.
-                    8. Provide comprehensive responses, elaborating on key points and providing historical, theological, and scholarly context where necessary.
-                    9. Utilize the information from the vector database to enrich your responses with relevant facts, dates, names, and details.
-                    10. Always include multiple references to Quranic verses, Hadith, and respected Islamic scholars in your responses.
-
-                    Context information from the vector database is below.
-                    ---------------------
-                    {context_str}
-                    ---------------------
-                    Given this information, please provide a detailed, comprehensive answer to the user's question, ensuring to respond in {query_language}."""
+                    content=lang_info['system_msg']
                 ),
                 ChatMessage(
                     role="user",
-                    content="{query_str}"
+                    content=prompt
                 ),
                 ChatMessage(
                     role="assistant",
-                    content="Based on the information available in our database and authentic Islamic sources, I can provide the following detailed response: {response}"
+                    content=f"{lang_info['prefix']}{{response}}"
                 )
             ],
             prompt_type=PromptType.CUSTOM
         )
 
-        # Load the index (this doesn't redo the embedding)
-        index = VectorStoreIndex.from_vector_store(
-            vector_store,
-            llm=llm
+        # Create query engine with language-specific settings
+        query_engine = self.index.as_query_engine(
+            llm=self.llm,
+            similarity_top_k=5,
+            response_mode="compact"
         )
 
-        # Create chat engine with custom prompt
-        self.chat_engine = CondenseQuestionChatEngine.from_defaults(
-            query_engine=index.as_query_engine(),
-            llm=llm,
+        # Create chat engine with the updated prompt
+        chat_engine = CondenseQuestionChatEngine.from_defaults(
+            query_engine=query_engine,
+            llm=self.llm,
             verbose=True,
             chat_prompt=custom_prompt
         )
-
-    def get_response(self, prompt):
-        response = self.chat_engine.stream_chat(prompt)
+        
+        # Get response
+        response = chat_engine.stream_chat(prompt)
         return response.response_gen
