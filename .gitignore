@@ -3,3 +3,4 @@ __pycache__/
 data.rar
 .env
 new_data
+.devcontainer

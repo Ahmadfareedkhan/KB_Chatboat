@@ -3,6 +3,9 @@ from dotenv import load_dotenv
 from pinecone import Pinecone
 from llama_index.core import VectorStoreIndex, Document
 from llama_index.core import StorageContext
+from llama_index.core.ingestion import IngestionPipeline
+from llama_index.core.node_parser import SentenceSplitter
+from llama_index.embeddings.openai import OpenAIEmbedding
 from llama_index.vector_stores.pinecone import PineconeVectorStore
 from pathlib import Path
 import fitz
@@ -69,8 +72,8 @@ def main():
     # Define directories to process
     # You can modify this list to include any directories you want to process
     directories_to_process = [
-        "data",        # Original data directory
-        # "new_data",    # New data directory
+        # "data",        # Original data directory
+        "new_data",    # New data directory
         # "new_data_2",  # Uncomment if you have this directory
         # Add more directories as needed
     ]
@@ -130,31 +133,28 @@ def main():
 
         print(f"Successfully processed {len(documents)} documents in this batch")
 
-        # Add documents to existing index
+        # Add documents to existing index using an Ingestion Pipeline for efficiency
         print("Adding documents to existing index...")
-        
-        # Add retry mechanism
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                # Use the existing index and add new documents
-                index = VectorStoreIndex.from_vector_store(vector_store)
-                
-                # Insert the new documents
-                for doc in documents:
-                    index.insert(doc)
-                
-                total_processed += len(documents)
-                print(f"Successfully added {len(documents)} documents to the index.")
-                break
-                
-            except Exception as e:
-                if attempt < max_retries - 1:
-                    print(f"Attempt {attempt + 1} failed. Retrying in 5 seconds...")
-                    time.sleep(5)
-                else:
-                    print(f"Failed to add documents after {max_retries} attempts: {e}")
-                    continue
+
+        try:
+            # Setup an ingestion pipeline
+            pipeline = IngestionPipeline(
+                transformations=[
+                    SentenceSplitter(chunk_size=1024, chunk_overlap=20),
+                    OpenAIEmbedding(model="text-embedding-3-small"),
+                ],
+                vector_store=vector_store,
+            )
+            
+            # Run the pipeline
+            pipeline.run(documents=documents, show_progress=True)
+            
+            total_processed += len(documents)
+            print(f"Successfully added {len(documents)} documents to the index.")
+
+        except Exception as e:
+            print(f"Failed to add documents to the index: {e}")
+            continue
 
     print(f"\n=== SUMMARY ===")
     print(f"Total documents processed and added: {total_processed}")
