@@ -41,13 +41,59 @@ class ChatEngine:
 
     def detect_language(self, text):
         try:
+            # First, use langdetect as a starting point
             lang = detect(text)
-            if lang == 'ar':
-                return {
-                    'code': 'ar',
-                    'name': 'Arabic',
-                    'system_msg': """أنت مساعد متخصص في موضوع ختم النبوة. يجب أن تجيب باللغة العربية فقط.
-                    
+            
+            # Additional heuristics to distinguish Arabic from Urdu
+            def is_likely_arabic(text):
+                # Arabic-specific characters that are rare in Urdu
+                arabic_chars = ['ض', 'ص', 'ث', 'ق', 'ف', 'غ', 'ع', 'ه', 'خ', 'ح', 'ج', 'ش', 'س', 'ي', 'ب', 'ل', 'ا', 'ت', 'ن', 'م', 'ك', 'ط', 'ذ', 'د', 'ز', 'ر', 'و']
+                
+                # Urdu-specific characters that are rare in Arabic
+                urdu_chars = ['ں', 'ے', 'ھ', 'ڈ', 'ٹ', 'ڑ', 'چ', 'پ', 'ژ', 'گ', 'ڇ', 'ٹھ', 'ڈھ', 'ڑھ', 'کھ', 'گھ', 'نھ', 'مھ', 'بھ', 'پھ', 'تھ', 'ٹھ', 'جھ', 'چھ', 'دھ', 'ڈھ', 'رھ', 'ڑھ', 'سھ', 'شھ', 'کھ', 'گھ', 'لھ', 'مھ', 'نھ', 'ھ']
+                
+                # Common Arabic words
+                arabic_words = ['الله', 'النبي', 'القرآن', 'الإسلام', 'المسلمين', 'الرسول', 'عليه', 'وسلم', 'صلى', 'تعالى', 'سبحانه', 'الحمد', 'رب', 'العالمين']
+                
+                # Common Urdu words
+                urdu_words = ['اللہ', 'نبی', 'قرآن', 'اسلام', 'مسلمان', 'رسول', 'علیہ', 'وسلم', 'صلی', 'تعالیٰ', 'سبحانہ', 'الحمد', 'رب', 'العالمین', 'ہے', 'کا', 'کے', 'کی', 'میں', 'سے', 'کو', 'نے', 'کر', 'اور', 'یہ', 'وہ', 'اس', 'کہ', 'جو', 'کون', 'کیا', 'کیوں', 'کہاں', 'کب', 'کیسے']
+                
+                # Count Arabic vs Urdu specific characters
+                arabic_char_count = sum(1 for char in text if char in arabic_chars)
+                urdu_char_count = sum(1 for char in text if char in urdu_chars)
+                
+                # Count Arabic vs Urdu specific words
+                arabic_word_count = sum(1 for word in arabic_words if word in text)
+                urdu_word_count = sum(1 for word in urdu_words if word in text)
+                
+                # Calculate scores
+                arabic_score = arabic_char_count + (arabic_word_count * 3)
+                urdu_score = urdu_char_count + (urdu_word_count * 3)
+                
+                # If there are clear Urdu-specific characters, it's likely Urdu
+                if urdu_char_count > 0:
+                    return False
+                
+                # If there are Arabic-specific words or characters, it's likely Arabic
+                if arabic_score > urdu_score:
+                    return True
+                
+                # If the original detection was Arabic, trust it unless there's strong evidence otherwise
+                if lang == 'ar':
+                    return True
+                
+                return False
+            
+            # Check if text contains Arabic or Urdu script
+            has_arabic_script = any('\u0600' <= c <= '\u06FF' or '\u0750' <= c <= '\u077F' for c in text)
+            
+            if has_arabic_script:
+                if is_likely_arabic(text):
+                    return {
+                        'code': 'ar',
+                        'name': 'Arabic',
+                        'system_msg': """أنت مساعد متخصص في موضوع ختم النبوة. يجب أن تجيب باللغة العربية فقط.
+                        
 المبادئ التوجيهية للإجابة:
 1. استخدم اللغة العربية الفصحى
 2. قدم الإجابات مع الأدلة من القرآن والسنة
@@ -56,13 +102,13 @@ class ChatEngine:
 
 المعلومات المتوفرة من قاعدة البيانات:
 {context_str}""",
-                    'prefix': 'الجواب: '
-                }
-            elif lang in ['ur', 'hi']:
-                return {
-                    'code': 'ur',
-                    'name': 'Urdu',
-                    'system_msg': """آپ ختم نبوت کے موضوع پر ماہر معاون ہیں۔ آپ کو صرف اردو میں جواب دینا ہے۔
+                        'prefix': 'الجواب: '
+                    }
+                else:
+                    return {
+                        'code': 'ur',
+                        'name': 'Urdu',
+                        'system_msg': """آپ ختم نبوت کے موضوع پر ماہر معاون ہیں۔ آپ کو صرف اردو میں جواب دینا ہے۔
 
 جواب دینے کے اصول:
 1. معیاری اردو کا استعمال کریں
@@ -72,8 +118,8 @@ class ChatEngine:
 
 ڈیٹا بیس سے دستیاب معلومات:
 {context_str}""",
-                    'prefix': 'جواب: '
-                }
+                        'prefix': 'جواب: '
+                    }
             else:
                 return {
                     'code': 'en',
@@ -94,7 +140,16 @@ Information available from the database:
             return {
                 'code': 'en',
                 'name': 'English',
-                'system_msg': "Default English response...",
+                'system_msg': """You are an expert assistant on the topic of the Finality of Prophethood. You must respond in English only.
+
+Response guidelines:
+1. Use formal English
+2. Provide evidence from Quran and Sunnah
+3. Cite reliable sources
+4. Be precise in quotations
+
+Information available from the database:
+{context_str}""",
                 'prefix': 'Response: '
             }
 
